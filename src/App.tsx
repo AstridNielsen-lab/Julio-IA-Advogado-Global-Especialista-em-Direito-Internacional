@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageCircle, Send, Scale, Globe2, Volume2, VolumeX, Phone, Mail, Link } from 'lucide-react';
+import { MessageCircle, Send, Scale, Globe2, Volume2, VolumeX, Phone, Mail, Link, Mic, MicOff } from 'lucide-react';
 
 interface Message {
   type: 'user' | 'bot';
@@ -32,14 +32,81 @@ function App() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
   const chatBoxRef = useRef<HTMLDivElement>(null);
   const speechSynthesis = window.speechSynthesis;
+  const recognitionRef = useRef<any>(null);
+  const pauseTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (chatBoxRef.current) {
       chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    // Initialize speech recognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'pt-BR';
+
+      recognitionRef.current.onstart = () => {
+        setIsListening(true);
+        setTranscript('');
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+        if (transcript.trim()) {
+          handleSend(transcript);
+          setTranscript('');
+        }
+      };
+
+      recognitionRef.current.onresult = (event: any) => {
+        const lastResult = event.results[event.results.length - 1];
+        const newTranscript = lastResult[0].transcript;
+        setTranscript(newTranscript);
+        setInput(newTranscript);
+        
+        if (lastResult.isFinal) {
+          if (pauseTimerRef.current) {
+            clearTimeout(pauseTimerRef.current);
+          }
+          
+          pauseTimerRef.current = setTimeout(() => {
+            recognitionRef.current?.stop();
+          }, 1500);
+        }
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      if (pauseTimerRef.current) {
+        clearTimeout(pauseTimerRef.current);
+      }
+    };
+  }, [transcript]);
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+    } else {
+      recognitionRef.current?.start();
+    }
+  };
 
   const speakMessage = (text: string) => {
     if (speechSynthesis.speaking) {
@@ -72,12 +139,12 @@ function App() {
       .trim();
   };
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  const handleSend = async (voiceInput?: string) => {
+    const messageText = voiceInput || input;
+    if (!messageText.trim()) return;
 
-    const userMessage = input;
     setInput('');
-    setMessages(prev => [...prev, { type: 'user', content: userMessage }]);
+    setMessages(prev => [...prev, { type: 'user', content: messageText }]);
     setIsLoading(true);
 
     try {
@@ -105,7 +172,7 @@ Explique os pontos principais de forma clara.
 Cite as leis relevantes naturalmente na conversa.
 Termine com uma conclusão e próximos passos.
 
-Consulta do cliente: ${userMessage}`
+Consulta do cliente: ${messageText}`
             }]
           }],
           generationConfig: {
@@ -235,18 +302,35 @@ Consulta do cliente: ${userMessage}`
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyPress={handleKeyPress}
-                    placeholder="Digite sua consulta jurídica..."
+                    placeholder={isListening ? "Falando..." : "Digite sua consulta jurídica..."}
                     className="flex-1 resize-none rounded-lg border border-gray-300 p-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     rows={2}
                   />
-                  <button
-                    onClick={handleSend}
-                    disabled={isLoading}
-                    className="bg-blue-600 text-white rounded-lg px-6 py-2 hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Send size={24} />
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => handleSend()}
+                      disabled={isLoading}
+                      className="bg-blue-600 text-white rounded-lg px-6 py-2 hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Send size={24} />
+                    </button>
+                    <button
+                      onClick={toggleListening}
+                      disabled={isLoading}
+                      className={`${
+                        isListening ? 'bg-red-600' : 'bg-blue-600'
+                      } text-white rounded-lg px-6 py-2 hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+                      title={isListening ? "Parar de gravar" : "Começar a gravar"}
+                    >
+                      {isListening ? <MicOff size={24} /> : <Mic size={24} />}
+                    </button>
+                  </div>
                 </div>
+                {isListening && (
+                  <div className="mt-2 text-sm text-gray-500">
+                    {transcript ? transcript : "Aguardando você falar..."}
+                  </div>
+                )}
               </div>
             </div>
 
